@@ -50,16 +50,22 @@ class Mtcd
 
     public $get_chunk_handler_attempts = 2; // кол-во попыток за которые нужно получить handler на чанк чтобы слить его в результирующий файл
 
+    public $setRemoteFileSize_callback; // ф-я которая вызовется после получения $setRemoteFileSize
+
+    public $saveReadyPercent_callback;  // ф-я которая будет вызываться на каждой итерации waitWhileCurlsAreEnd
+
+
+
+    public $remote_file_size; // сюда запишется заявленый размер скачиваемого файла
+
+    public $ready_percent; // готовность скачивания
+
     private $default_chunk_size; // размер чанка на каждый курл процесс
-
-    private $remote_file_size; // сюда запишется заявленый размер скачиваемого файла
-
     private $chunks_arr_right_order = []; // сюда рассчитаются будущие чанки
+
     private $chunks_arr = []; // сюда рассчитаются будущие чанки с сортировкой
 
     private $output_full_path = ""; // full path output with file_name
-
-    private $ready_percent; // готовность скачивания
 
 
 
@@ -114,6 +120,7 @@ class Mtcd
         $this->setFullPath();
 
         $this->setRemoteFileSize();
+        is_callable($this->setRemoteFileSize_callback) && call_user_func($this->setRemoteFileSize_callback, $this);
 
         if($this->remote_file_size < $this->min_file_size) {
             throw new Exception("remote_file_size is too small");
@@ -279,6 +286,8 @@ class Mtcd
             clearstatcache();
             // TODO @filesize -> filesize ???
             $this->ready_percent = round(@filesize($biggest_chunk['full_path_to_chunk']) / $biggest_chunk['size'] * 100,2);
+            is_callable($this->saveReadyPercent_callback) && call_user_func($this->saveReadyPercent_callback, $this);
+
             if(is_cli()){$this->d($this->ready_percent."%");}
             if ($this->countCurlProcesses() < 1) break;
             sleep(1);
@@ -292,10 +301,14 @@ class Mtcd
      * @throws Exception
      */
     private function checkChunksSizes(){
+        $this->d("checkChunksSizes");
         clearstatcache();
 
         foreach($this->chunks_arr as $chunk){
-            if($chunk['size'] != filesize($chunk['full_path_to_chunk'])){
+            $real_chunk_size = filesize($chunk['full_path_to_chunk']);
+            $this->d("calculated: ".$chunk['size']." vs real: ".$real_chunk_size);
+
+            if($real_chunk_size < ($chunk['size']*0.9) || $real_chunk_size > ($chunk['size']*1.1)){
                 throw new Exception("not valid chunk size");
             }
         }
@@ -458,12 +471,18 @@ class Mtcd
 $ddd = new Mtcd();
 d($ddd);
 
+$setRemoteFileSize_callback = function($obj){
+    d("from call back ".$obj->url);
+};
+
+
 try{
     $ddd
         ->setOpt('url', "http://path/to/file.mp4")
         ->setOpt('output_folder', "D:\\")
         ->setOpt('output_file_name', "1.mp4")
         ->setOpt('threads', 5)
+        ->setOpt('setRemoteFileSize_callback', $setRemoteFileSize_callback)
         ->download();
 }catch (Exception $e){
     d($e->getMessage());
