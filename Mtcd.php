@@ -38,15 +38,15 @@ class Mtcd
 
     public $useragent = 'Mozilla/5.0 (Windows NT 6.3; Win64; x64; rv:57.0) Gecko/20100101 Firefox/57.0';
 
-    public $url = ""; // url to download
+    public $url; // url to download
 
-    public $output_file_name = ""; // file name output
+    public $output_file_name; // file name output
 
-    public $output_folder = ""; // folder to output
+    public $output_folder; // folder to output
 
-    public $curl_cmd_flag = "";// '/B'; // терминалы с курлами будут скрыты
+    public $curl_cmd_flag = '/B'; // терминалы с курлами будут скрыты
 
-    public $curls_end_time_limit = 3600; // лимит - сколько ждать завершения саомго большого курл-потока (в секундах)
+    public $curls_end_time_limit = 2000; // лимит - сколько ждать завершения саомго большого курл-потока (в секундах)
 
     public $get_chunk_handler_attempts = 2; // кол-во попыток за которые нужно получить handler на чанк чтобы слить его в результирующий файл
 
@@ -58,7 +58,10 @@ class Mtcd
 
     public $remote_file_size; // сюда запишется заявленый размер скачиваемого файла
 
-    public $ready_percent; // готовность скачивания
+    public $ready_percent=0; // готовность скачивания
+    private $old_ready_percent=0; // Предыдущий показатель готовности скачивания (для проверки что процент меняется)
+    private $ready_percent_same=0; // счетчик - сколько раз процент не менялся
+    private $ready_percent_same_limit=100; // лимит перед остановкой скачивания
 
     private $default_chunk_size; // размер чанка на каждый курл процесс
     private $chunks_arr_right_order = []; // сюда рассчитаются будущие чанки
@@ -153,7 +156,7 @@ class Mtcd
         foreach ($this->chunks_arr as $chunk)
         {
             if(file_exists($chunk['full_path_to_chunk'])){
-                unlink($chunk['full_path_to_chunk']);
+                @unlink($chunk['full_path_to_chunk']);
             }
         } // foreach
     } // func
@@ -276,6 +279,7 @@ class Mtcd
      * Метод синхронно ждет пока не изчезнут все курл процессы по данному файлу
      */
     private function waitWhileCurlsAreEnd(){
+        sleep(3);
         $started_at = time();
         $biggest_chunk = $this->chunks_arr[0];
         do {
@@ -284,15 +288,40 @@ class Mtcd
             }
 
             clearstatcache();
-            // TODO @filesize -> filesize ???
+
             $this->ready_percent = round(@filesize($biggest_chunk['full_path_to_chunk']) / $biggest_chunk['size'] * 100,2);
             is_callable($this->saveReadyPercent_callback) && call_user_func($this->saveReadyPercent_callback, $this);
 
-            if(is_cli()){$this->d($this->ready_percent."%");}
+            try{
+                $this->checkReadyPercentOnUnicOrFail();
+            }catch (Exception $e){
+                throw new Exception($e->getMessage());
+            }
+
+            if(is_cli()){ $this->d($this->ready_percent."% same {$this->ready_percent_same} / {$this->ready_percent_same_limit}"); }
+
             if ($this->countCurlProcesses() < 1) break;
             sleep(1);
         } while (1);
 
+    } // func
+
+
+    /**
+     * Метод проверяет что процент скачивания меняется
+     */
+    private function checkReadyPercentOnUnicOrFail()
+    {
+        if($this->ready_percent_same > $this->ready_percent_same_limit){
+            throw new Exception("old_ready_percent_same_limit");
+        }
+
+        if($this->ready_percent == $this->old_ready_percent){
+            $this->ready_percent_same++;
+        }else{
+            $this->old_ready_percent = $this->ready_percent;
+            $this->ready_percent_same=0;
+        }
     } // func
 
 
